@@ -1,0 +1,15 @@
+{
+    "name": "rest-api-to-csv",
+    "version": "0.0.1",
+    "description": "Node.js on Docker",
+    "author": "Jan Jambor <jan.jambor@xwr.ch>",
+    "repository": "tbd",
+    "license": "mit",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.17.1"
+    }
+  }

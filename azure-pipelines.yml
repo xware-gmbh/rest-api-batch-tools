@@ -1,0 +1,114 @@
+# # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+# Content: build pipeline for rest-api-to-csv
+# Author: Jan Jambor, XWare GmbH
+# Author URI: https://xwr.ch
+# Date: 03.08.2021
+#
+# # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# To be done: propper stage setup when finally tested
+parameters:
+- name: stage
+  displayName: Stage
+  type: string
+  default: Build
+  values:
+  - Build
+  - BuildDeploy
+
+trigger:
+#- none
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry service connection established during pipeline creation
+  # dockerRegistryServiceConnection: '483afb1a-76cf-4405-8e74-36f73fc8c3d8'
+  - name: dockerRegistryServiceConnection
+    value: 'jjscontainers'
+  - name: imageRepository
+    value: 'rest-api-to-csv'
+  - name: containerRegistry
+    value: 'jjscontainers.azurecr.io'
+  - name: dockerfilePath
+    value: '$(Build.SourcesDirectory)/Dockerfile'
+  - name: tag
+    value: '$(Build.BuildId)'
+  # Agent VM image name
+  - name: vmImageName
+    value: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build a new Docker image
+  condition: eq('${{ parameters.stage }}', 'Build')
+  jobs:
+  
+  - job: Build
+    displayName: Build a new Docker image
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        command: build
+        repository: $(imageRepository)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        dockerfile: $(dockerfilePath)
+        tags: $(tag)
+        arguments: '--build-arg BUILD_TAG=$(tag)'
+
+    - task: Docker@2
+      displayName: Push an image to container registry
+      inputs:
+        command: push
+        repository: $(imageRepository)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: $(tag)
+
+- stage: BuildDeploy
+  displayName: Build a new Docker image and deploy it
+  condition: in('${{ parameters.stage }}', 'BuildDeploy')
+  jobs:
+  - job: Build
+    displayName: Build a new Docker image and deploy it
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+
+    - task: Docker@2
+      displayName: Build an image
+      inputs:
+        command: build
+        repository: $(imageRepository)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        dockerfile: $(dockerfilePath)
+        tags: $(tag)
+        arguments: '--build-arg BUILD_TAG=$(tag)'
+
+    - task: Docker@2
+      displayName: Push an image to container registry
+      inputs:
+        command: push
+        repository: $(imageRepository)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: $(tag)
+
+    - script: |
+        az login --service-principal --username $(k8s_client_id) --password $(k8s_client_secret) --tenant $(k8s_tenant_id)
+      displayName: 'Login to Azure with Service Principal'
+    - script: |
+        az aks get-credentials --resource-group TST-rg-k8s-kstjj-001 --name k8s --overwrite-existing
+      displayName: 'Get cluster info'
+    - script: |
+        kubectl create namespace ns-restapitool --dry-run=client -o yaml | kubectl apply -f -
+        kubectl config set-context --current --namespace=ns-restapitool
+      displayName: 'Switch to namespace'
+    - script: |
+        kubectl set image deployments/apiloadtool-mig apiloadtool-mig=jjscontainers.azurecr.io/api-load-tool:$(tag) -n ns-restapitool
+      displayName: 'Update k8s application in place'
